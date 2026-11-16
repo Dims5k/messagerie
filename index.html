@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Messagerie</title>
+<style>
+  :root{--bg:#0e1117;--panel:#171b24;--line:#272d3a;--txt:#e9ecf2;--mute:#8b94a7;--acc:#5b8cff;--me:#1f3366;--red:#ff5f5f}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .screen{display:none;height:100%}
+  .screen.on{display:flex}
+  .center{align-items:center;justify-content:center;padding:20px}
+  .card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:26px}
+  h1{margin:0 0 4px;font-size:22px} h2{margin:0;font-size:17px}
+  .sub{color:var(--mute);font-size:13px;margin:0 0 18px}
+  label{display:block;font-size:12px;color:var(--mute);margin:12px 0 6px}
+  input,textarea{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:#0f1219;color:var(--txt);font-size:16px;outline:none;font-family:inherit}
+  input:focus{border-color:var(--acc)}
+  button{cursor:pointer;border:0;border-radius:12px;font-weight:600;font-size:15px;font-family:inherit}
+  .btn{width:100%;margin-top:16px;padding:13px;background:var(--acc);color:#fff}
+  .btn:disabled{opacity:.5}
+  .link{background:none;color:var(--acc);padding:6px 0;margin-top:10px;font-weight:500}
+  .ghost{background:transparent;color:var(--txt);border:1px solid var(--line);padding:8px 12px;font-size:13px}
+  .msg-info{font-size:13px;min-height:18px;margin-top:10px}
+  .msg-info.err{color:var(--red)} .msg-info.ok{color:#4fd18b}
+  .check{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:13px;color:var(--mute)}
+  .check input{width:auto;margin-top:3px}
+  .rules{font-size:12px;color:var(--mute);background:#0f1219;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:12px}
+  .rules li{margin:3px 0}
+  .col{flex-direction:column;width:100%}
+  header{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header .t{flex:1;min-width:0}
+  header .t span{display:block;font-size:12px;color:var(--mute)}
+  .body{flex:1;overflow-y:auto;padding:16px}
+  .wrap{max-width:640px;margin:0 auto;width:100%}
+  .row{display:flex;gap:8px;margin-top:10px}
+  .row input{flex:1} .row button{padding:0 16px;background:var(--acc);color:#fff}
+  .room{display:flex;justify-content:space-between;align-items:center;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);margin-top:10px;cursor:pointer}
+  .room:hover{border-color:var(--acc)}
+  .room small{color:var(--mute)}
+  .section{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;margin:22px 0 2px}
+  #msgs{display:flex;flex-direction:column;gap:6px}
+  .m{max-width:80%;padding:8px 12px;border-radius:14px;background:var(--panel);border:1px solid var(--line);word-wrap:break-word;white-space:pre-wrap;cursor:pointer}
+  .m.me{align-self:flex-end;background:var(--me);border-color:#2c4688}
+  .m .who{font-size:11px;font-weight:700;color:var(--acc);margin-bottom:2px}
+  .m .time{font-size:10px;color:var(--mute);margin-top:3px;text-align:right}
+  .m img{display:block;max-width:100%;max-height:340px;border-radius:10px;margin-top:4px}
+  footer{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:var(--panel);padding-bottom:max(10px,env(safe-area-inset-bottom))}
+  footer input{flex:1}
+  .icon{width:46px;flex:none;background:#0f1219;border:1px solid var(--line);color:var(--txt);font-size:19px}
+  .send{padding:0 18px;background:var(--acc);color:#fff}
+  .sheet{position:fixed;inset:0;background:#0009;display:none;align-items:flex-end;justify-content:center;z-index:50}
+  .sheet.on{display:flex}
+  .sheet .box{width:100%;max-width:480px;background:var(--panel);border-radius:18px 18px 0 0;padding:14px;padding-bottom:max(14px,env(safe-area-inset-bottom))}
+  .sheet button{width:100%;padding:14px;margin-top:6px;background:#0f1219;color:var(--txt);border:1px solid var(--line)}
+  .sheet button.danger{color:var(--red)}
+  .code{font-family:ui-monospace,monospace;letter-spacing:.12em;background:#0f1219;border:1px solid var(--line);padding:2px 8px;border-radius:8px}
+  .report{padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-top:10px;font-size:14px}
+  .report .meta{color:var(--mute);font-size:12px}
+  .report .acts{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .empty{color:var(--mute);text-align:center;padding:30px 0;font-size:14px}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<!-- ============ CONNEXION / INSCRIPTION ============ -->
+<div id="s-auth" class="screen center">
+  <div class="card">
+    <h1 id="auth-title">Connexion</h1>
+    <p class="sub">Messagerie privée sur invitation.</p>
+    <label>E-mail</label>
+    <input id="email" type="email" autocomplete="email">
+    <label>Mot de passe</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="8 caractères minimum">
+    <button id="auth-btn" class="btn">Se connecter</button>
+    <button id="auth-switch" class="link">Pas de compte ? Créer un compte</button>
+    <button id="forgot" class="link" style="display:block">Mot de passe oublié</button>
+    <div id="auth-info" class="msg-info"></div>
+  </div>
+</div>
+
+<!-- ============ CHOIX DU PSEUDO + RÈGLES ============ -->
+<div id="s-setup" class="screen center">
+  <div class="card">
+    <h1>Ton pseudo</h1>
+    <p class="sub">C'est le seul nom que les autres verront.</p>
+    <input id="username" maxlength="20" placeholder="Ex : Shadow_42">
+    <ul class="rules">
+      <li>Respect des autres membres : pas d'insultes, de harcèlement ni de menaces.</li>
+      <li>Aucun contenu illégal, violent ou sexuel non consenti.</li>
+      <li>Ne partage pas les photos ou infos des autres sans leur accord.</li>
+      <li>Les messages signalés sont vérifiés et les comptes peuvent être bannis.</li>
+    </ul>
+    <label class="check"><input type="checkbox" id="accept"> J'ai lu et j'accepte les règles.</label>
+    <button id="setup-btn" class="btn">Continuer</button>
+    <div id="setup-info" class="msg-info"></div>
+  </div>
+</div>
+
+<!-- ============ LISTE DES SALONS ============ -->
+<div id="s-home" class="screen col">
+  <header>
+    <div class="t"><h2>Mes salons</h2><span id="me-name"></span></div>
+    <button id="admin-btn" class="ghost hidden">🛡️ Modération</button>
+    <button id="logout" class="ghost">Déconnexion</button>
+  </header>
+  <div class="body"><div class="wrap">
+    <div class="section">Rejoindre avec un code</div>
+    <div class="row"><input id="join-code" placeholder="Code d'invitation" maxlength="8" style="text-transform:uppercase"><button id="join-btn">Rejoindre</button></div>
+    <div class="section">Créer un salon</div>
+    <div class="row"><input id="room-name" placeholder="Nom du salon" maxlength="40"><button id="create-btn">Créer</button></div>
+    <div id="home-info" class="msg-info"></div>
+    <div class="section">Salons</div>
+    <div id="rooms"></div>
+  </div></div>
+</div>
+
+<!-- ============ SALON ============ -->
+<div id="s-room" class="screen col">
+  <header>
+    <button id="back" class="ghost">←</button>
+    <div class="t"><h2 id="room-title"></h2><span id="room-sub"></span></div>
+    <button id="room-menu" class="ghost">⋯</button>
+  </header>
+  <div class="body" id="scroller"><div class="wrap" id="msgs"></div></div>
+  <footer>
+    <button class="icon" id="pick" title="Photo">📷</button>
+    <input id="file" type="file" accept="image/*" hidden>
+    <input id="txt" placeholder="Message…" maxlength="2000" autocomplete="off">
+    <button class="send" id="send">➤</button>
+  </footer>
+</div>
+
+<!-- ============ MODÉRATION ============ -->
+<div id="s-admin" class="screen col">
+  <header>
+    <button id="admin-back" class="ghost">←</button>
+    <div class="t"><h2>Signalements</h2><span>Non traités</span></div>
+  </header>
+  <div class="body"><div class="wrap" id="reports"></div></div>
+</div>
+
+<!-- Menu contextuel -->
+<div id="sheet" class="sheet"><div class="box" id="sheet-box"></div></div>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+// ======= À REMPLIR (Supabase > Project Settings > API) =======
+const SUPABASE_URL = 'https://yliagjukekpislgrcdrs.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_-N-vIJLCZBbHZ_Eg_6AjvQ_P-Xw9p3a';
+// =============================================================
+
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+let me = null, profile = null, room = null, channel = null, signupMode = false;
+const names = new Map();
+
+// ---------- Utilitaires ----------
+function show(id){ document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); }
+function info(el, text, type = 'err'){ el.textContent = text || ''; el.className = 'msg-info ' + type; }
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function fmtTime(d){ return new Date(d).toLocaleString('fr-BE', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit' }); }
+function closeSheet(){ $('sheet').classList.remove('on'); }
+$('sheet').onclick = e => { if (e.target.id === 'sheet') closeSheet(); };
+function openSheet(actions){
+  const box = $('sheet-box'); box.innerHTML = '';
+  actions.forEach(([label, fn, danger]) => {
+    const b = el('button', danger ? 'danger' : '', label);
+    b.onclick = () => { closeSheet(); fn(); };
+    box.appendChild(b);
+  });
+  const c = el('button', '', 'Annuler'); c.onclick = closeSheet; box.appendChild(c);
+  $('sheet').classList.add('on');
+}
+async function loadNames(ids){
+  const missing = [...new Set(ids)].filter(id => id && !names.has(id));
+  if (!missing.length) return;
+  const { data } = await sb.from('profiles').select('id, username').in('id', missing);
+  (data || []).forEach(p => names.set(p.id, p.username));
+}
+
+// ---------- Authentification ----------
+$('auth-switch').onclick = () => {
+  signupMode = !signupMode;
+  $('auth-title').textContent = signupMode ? 'Créer un compte' : 'Connexion';
+  $('auth-btn').textContent = signupMode ? "S'inscrire" : 'Se connecter';
+  $('auth-switch').textContent = signupMode ? 'Déjà un compte ? Se connecter' : 'Pas de compte ? Créer un compte';
+  info($('auth-info'), '');
+};
+
+$('auth-btn').onclick = async () => {
+  const email = $('email').value.trim(), password = $('password').value;
+  if (!email || password.length < 8) return info($('auth-info'), 'E-mail valide et mot de passe de 8 caractères minimum.');
+  $('auth-btn').disabled = true;
+  if (signupMode) {
+    const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+    if (error) info($('auth-info'), error.message);
+    else info($('auth-info'), 'Compte créé ! Clique sur le lien reçu par e-mail pour l\'activer.', 'ok');
+  } else {
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) info($('auth-info'), error.message === 'Email not confirmed' ? 'Confirme d\'abord ton e-mail.' : 'E-mail ou mot de passe incorrect.');
+  }
+  $('auth-btn').disabled = false;
+};
+
+$('forgot').onclick = async () => {
+  const email = $('email').value.trim();
+  if (!email) return info($('auth-info'), 'Entre ton e-mail au-dessus.');
+  await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  info($('auth-info'), 'Si ce compte existe, un e-mail de réinitialisation a été envoyé.', 'ok');
+};
+
+sb.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'PASSWORD_RECOVERY') {
+    const pw = prompt('Nouveau mot de passe (8 caractères min.) :');
+    if (pw && pw.length >= 8) { await sb.auth.updateUser({ password: pw }); alert('Mot de passe modifié.'); }
+  }
+  me = session?.user || null;
+  if (!me) { profile = null; return show('s-auth'); }
+  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') await afterLogin();
+});
+
+async function afterLogin(){
+  const { data } = await sb.from('profiles').select('*').eq('id', me.id).maybeSingle();
+  profile = data;
+  if (!profile) return show('s-setup');
+  if (profile.banned) { alert('Ce compte a été banni pour non-respect des règles.'); await sb.auth.signOut(); return; }
+  names.set(profile.id, profile.username);
+  $('me-name').textContent = '@' + profile.username;
+  $('admin-btn').classList.toggle('hidden', !profile.is_admin);
+  goHome();
+}
+
+$('setup-btn').onclick = async () => {
+  const username = $('username').value.trim();
+  if (!/^[\w.-]{3,20}$/.test(username)) return info($('setup-info'), '3 à 20 caractères : lettres, chiffres, . _ -');
+  if (!$('accept').checked) return info($('setup-info'), 'Tu dois accepter les règles.');
+  const { error } = await sb.from('profiles').insert({ id: me.id, username });
+  if (error) return info($('setup-info'), error.code === '23505' ? 'Ce pseudo est déjà pris.' : error.message);
+  afterLogin();
+};
+
+$('logout').onclick = () => sb.auth.signOut();
+
+// ---------- Salons ----------
+async function goHome(){
+  leaveChannel(); room = null; show('s-home'); info($('home-info'), '');
+  const { data } = await sb.from('rooms').select('*').order('created_at', { ascending: false });
+  const list = $('rooms'); list.innerHTML = '';
+  if (!data?.length) return list.appendChild(el('div', 'empty', 'Aucun salon pour l\'instant.'));
+  data.forEach(r => {
+    const d = el('div', 'room');
+    const left = el('div'); left.appendChild(el('div', '', r.name));
+    left.appendChild(el('small', '', r.owner === me.id ? 'Ton salon' : 'Membre'));
+    d.appendChild(left); d.appendChild(el('span', '', '›'));
+    d.onclick = () => openRoom(r);
+    list.appendChild(d);
+  });
+}
+
+$('create-btn').onclick = async () => {
+  const name = $('room-name').value.trim();
+  if (!name) return;
+  const { data, error } = await sb.from('rooms').insert({ name, owner: me.id }).select().single();
+  if (error) return info($('home-info'), error.message);
+  $('room-name').value = ''; openRoom(data);
+};
+
+$('join-btn').onclick = async () => {
+  const code = $('join-code').value.trim();
+  if (!code) return;
+  const { data, error } = await sb.rpc('join_room', { code });
+  if (error) return info($('home-info'), 'Code invalide.');
+  $('join-code').value = '';
+  const { data: r } = await sb.from('rooms').select('*').eq('id', data).single();
+  openRoom(r);
+};
+
+$('back').onclick = goHome;
+
+$('room-menu').onclick = () => {
+  const isOwner = room.owner === me.id;
+  const acts = [];
+  if (isOwner) {
+    acts.push(['📋 Copier le code : ' + room.invite_code, () => navigator.clipboard?.writeText(room.invite_code)]);
+    acts.push(['🔄 Nouveau code (l\'ancien ne marche plus)', async () => {
+      const { data, error } = await sb.rpc('reset_invite', { r: room.id });
+      if (!error) { room.invite_code = data; renderRoomHeader(); alert('Nouveau code : ' + data); }
+    }]);
+    acts.push(['🗑️ Supprimer le salon', async () => {
+      if (!confirm('Supprimer définitivement ce salon et tous ses messages ?')) return;
+      await sb.from('rooms').delete().eq('id', room.id); goHome();
+    }, true]);
+  } else {
+    acts.push(['🚪 Quitter le salon', async () => {
+      await sb.from('room_members').delete().eq('room_id', room.id).eq('user_id', me.id); goHome();
+    }, true]);
+  }
+  openSheet(acts);
+};
+
+function renderRoomHeader(){
+  $('room-title').textContent = room.name;
+  $('room-sub').innerHTML = '';
+  if (room.owner === me.id) { $('room-sub').append('Code : '); $('room-sub').appendChild(el('span', 'code', room.invite_code)); }
+  else $('room-sub').textContent = 'Salon privé';
+}
+
+async function openRoom(r){
+  room = r; show('s-room'); renderRoomHeader();
+  $('msgs').innerHTML = '';
+  const { data } = await sb.from('messages').select('*').eq('room_id', r.id).order('created_at', { ascending: false }).limit(100);
+  const msgs = (data || []).reverse();
+  await loadNames(msgs.map(m => m.user_id));
+  if (!msgs.length) $('msgs').appendChild(el('div', 'empty', 'Aucun message. Lance la conversation !'));
+  for (const m of msgs) await addMessage(m);
+  scrollDown();
+  leaveChannel();
+  channel = sb.channel('room-' + r.id)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'room_id=eq.' + r.id },
+      async ({ new: m }) => { await loadNames([m.user_id]); $('msgs').querySelector('.empty')?.remove(); await addMessage(m); scrollDown(); })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' },
+      ({ old }) => document.querySelector(`[data-id="${old.id}"]`)?.remove())
+    .subscribe();
+}
+
+function leaveChannel(){ if (channel) { sb.removeChannel(channel); channel = null; } }
+function scrollDown(){ const s = $('scroller'); requestAnimationFrame(() => s.scrollTop = s.scrollHeight); }
+
+async function addMessage(m){
+  if (document.querySelector(`[data-id="${m.id}"]`)) return;
+  const mine = m.user_id === me.id;
+  const d = el('div', 'm' + (mine ? ' me' : '')); d.dataset.id = m.id;
+  if (!mine) d.appendChild(el('div', 'who', names.get(m.user_id) || '…'));
+  if (m.content) d.appendChild(el('div', '', m.content));
+  if (m.image_path) {
+    const img = document.createElement('img'); img.alt = 'photo';
+    const { data } = await sb.storage.from('photos').createSignedUrl(m.image_path, 3600);
+    if (data) img.src = data.signedUrl;
+    img.onload = () => scrollDown();
+    d.appendChild(img);
+  }
+  d.appendChild(el('div', 'time', fmtTime(m.created_at)));
+  d.onclick = e => { if (e.target.tagName !== 'IMG') messageMenu(m); else window.open(e.target.src, '_blank'); };
+  $('msgs').appendChild(d);
+}
+
+function messageMenu(m){
+  const canDelete = m.user_id === me.id || profile.is_admin || room.owner === me.id;
+  const acts = [];
+  if (m.content) acts.push(['📋 Copier', () => navigator.clipboard?.writeText(m.content)]);
+  if (m.user_id !== me.id) acts.push(['🚩 Signaler', () => report(m)]);
+  if (canDelete) acts.push(['🗑️ Supprimer', () => deleteMessage(m), true]);
+  if (profile.is_admin && m.user_id !== me.id) acts.push(['⛔ Bannir ' + (names.get(m.user_id) || ''), () => ban(m.user_id), true]);
+  openSheet(acts);
+}
+
+async function deleteMessage(m){
+  if (m.image_path) await sb.storage.from('photos').remove([m.image_path]);
+  await sb.from('messages').delete().eq('id', m.id);
+  document.querySelector(`[data-id="${m.id}"]`)?.remove();
+}
+
+async function report(m){
+  const reason = prompt('Pourquoi signales-tu ce message ?');
+  if (reason === null) return;
+  const { error } = await sb.from('reports').insert({
+    message_id: m.id, reported_user: m.user_id, reporter: me.id,
+    reason: reason.slice(0, 300), snapshot: m.content || '[photo]'
+  });
+  alert(error ? 'Erreur lors du signalement.' : 'Merci, le message a été signalé.');
+}
+
+async function ban(userId){
+  if (!confirm('Bannir ce membre ? Il ne pourra plus envoyer de messages.')) return;
+  const { error } = await sb.rpc('set_ban', { target: userId, value: true });
+  alert(error ? error.message : 'Membre banni.');
+}
+
+// ---------- Envoi ----------
+async function sendText(){
+  const content = $('txt').value.trim();
+  if (!content || !room) return;
+  $('txt').value = '';
+  const { error } = await sb.from('messages').insert({ room_id: room.id, user_id: me.id, content });
+  if (error) { $('txt').value = content; alert('Message non envoyé.'); }
+}
+$('send').onclick = sendText;
+$('txt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } };
+
+$('pick').onclick = () => $('file').click();
+$('file').onchange = async () => {
+  const f = $('file').files[0]; $('file').value = '';
+  if (!f || !room) return;
+  $('pick').disabled = true; $('pick').textContent = '⏳';
+  try {
+    const blob = await compress(f);
+    const path = `${room.id}/${me.id}/${Date.now()}.jpg`;
+    const { error: upErr } = await sb.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' });
+    if (upErr) throw upErr;
+    const { error } = await sb.from('messages').insert({ room_id: room.id, user_id: me.id, image_path: path });
+    if (error) throw error;
+  } catch (e) { alert('Photo non envoyée.'); }
+  $('pick').disabled = false; $('pick').textContent = '📷';
+};
+
+// Redimensionne et compresse (et supprime les métadonnées GPS au passage)
+function compress(file, max = 1600, q = 0.82){
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      c.toBlob(b => b ? res(b) : rej(), 'image/jpeg', q);
+    };
+    img.onerror = rej;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ---------- Modération ----------
+$('admin-btn').onclick = openAdmin;
+$('admin-back').onclick = goHome;
+
+async function openAdmin(){
+  show('s-admin');
+  const box = $('reports'); box.innerHTML = '';
+  const { data } = await sb.from('reports').select('*').eq('resolved', false).order('created_at', { ascending: false });
+  if (!data?.length) return box.appendChild(el('div', 'empty', 'Aucun signalement en attente 👌'));
+  await loadNames(data.flatMap(r => [r.reporter, r.reported_user]));
+  data.forEach(r => {
+    const d = el('div', 'report');
+    d.appendChild(el('div', 'meta', `${fmtTime(r.created_at)} · par @${names.get(r.reporter) || '?'} contre @${names.get(r.reported_user) || '?'}`));
+    d.appendChild(el('div', '', '« ' + (r.snapshot || '') + ' »'));
+    if (r.reason) d.appendChild(el('div', 'meta', 'Motif : ' + r.reason));
+    const acts = el('div', 'acts');
+    const mk = (label, fn) => { const b = el('button', 'ghost', label); b.onclick = fn; acts.appendChild(b); };
+    mk('✅ Classer', async () => { await sb.from('reports').update({ resolved: true }).eq('id', r.id); openAdmin(); });
+    if (r.message_id) mk('🗑️ Supprimer le message', async () => {
+      const { data: m } = await sb.from('messages').select('*').eq('id', r.message_id).maybeSingle();
+      if (m) await deleteMessage(m);
+      await sb.from('reports').update({ resolved: true }).eq('id', r.id); openAdmin();
+    });
+    mk('⛔ Bannir', async () => { await ban(r.reported_user); await sb.from('reports').update({ resolved: true }).eq('id', r.id); openAdmin(); });
+    d.appendChild(acts); box.appendChild(d);
+  });
+}
+</script>
+</body>
+</html>
