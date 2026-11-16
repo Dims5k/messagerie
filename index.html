@@ -59,6 +59,14 @@
   .report{padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-top:10px;font-size:14px}
   .report .meta{color:var(--mute);font-size:12px}
   .report .acts{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .tabs{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .tab{flex:1;padding:10px;background:#0f1219;color:var(--mute);border:1px solid var(--line)}
+  .tab.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+  .stat b{display:block;font-size:20px} .stat span{font-size:11px;color:var(--mute)}
+  .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+  .b-admin{background:#2b3d77;color:#b9c9ff} .b-ban{background:#5a1f25;color:#ffb3b3} .b-wait{background:#4a3e14;color:#ffe08a} .b-new{background:#173f2c;color:#8ff0bd}
   .empty{color:var(--mute);text-align:center;padding:30px 0;font-size:14px}
   .hidden{display:none!important}
 </style>
@@ -137,8 +145,12 @@
 <div id="s-admin" class="screen col">
   <header>
     <button id="admin-back" class="ghost">←</button>
-    <div class="t"><h2>Signalements</h2><span>Non traités</span></div>
+    <div class="t"><h2>Modération</h2><span id="admin-sub"></span></div>
   </header>
+  <div class="tabs">
+    <button id="tab-members" class="tab on">👥 Membres</button>
+    <button id="tab-reports" class="tab">🚩 Signalements</button>
+  </div>
   <div class="body"><div class="wrap" id="reports"></div></div>
 </div>
 
@@ -425,11 +437,19 @@ function compress(file, max = 1600, q = 0.82){
 }
 
 // ---------- Modération ----------
-$('admin-btn').onclick = openAdmin;
+let adminTab = 'members';
+$('admin-btn').onclick = () => openAdmin();
 $('admin-back').onclick = goHome;
+$('tab-members').onclick = () => openAdmin('members');
+$('tab-reports').onclick = () => openAdmin('reports');
 
-async function openAdmin(){
+async function openAdmin(tab = adminTab){
+  adminTab = tab;
   show('s-admin');
+  $('tab-members').classList.toggle('on', tab === 'members');
+  $('tab-reports').classList.toggle('on', tab === 'reports');
+  if (tab === 'members') return openMembers();
+  $('admin-sub').textContent = 'Signalements non traités';
   const box = $('reports'); box.innerHTML = '';
   const { data } = await sb.from('reports').select('*').eq('resolved', false).order('created_at', { ascending: false });
   if (!data?.length) return box.appendChild(el('div', 'empty', 'Aucun signalement en attente 👌'));
@@ -449,6 +469,49 @@ async function openAdmin(){
     });
     mk('⛔ Bannir', async () => { await ban(r.reported_user); await sb.from('reports').update({ resolved: true }).eq('id', r.id); openAdmin(); });
     d.appendChild(acts); box.appendChild(d);
+  });
+}
+
+async function openMembers(){
+  const box = $('reports'); box.innerHTML = '';
+  $('admin-sub').textContent = 'Chargement…';
+  const { data, error } = await sb.rpc('admin_list_users');
+  if (error) { $('admin-sub').textContent = ''; return box.appendChild(el('div', 'empty', 'Erreur : ' + error.message)); }
+  const users = data || [];
+  const week = Date.now() - 7 * 864e5;
+  const isNew = u => new Date(u.created_at).getTime() > week;
+  $('admin-sub').textContent = users.length + ' inscrit' + (users.length > 1 ? 's' : '');
+
+  const stats = el('div', 'stats');
+  [[users.length, 'Inscrits'], [users.filter(isNew).length, '7 derniers jours'], [users.filter(u => u.banned).length, 'Bannis']]
+    .forEach(([n, l]) => { const s = el('div', 'stat'); s.appendChild(el('b', '', n)); s.appendChild(el('span', '', l)); stats.appendChild(s); });
+  box.appendChild(stats);
+
+  if (!users.length) return box.appendChild(el('div', 'empty', 'Personne pour l\'instant.'));
+  users.forEach(u => {
+    const d = el('div', 'report');
+    const title = el('div');
+    title.appendChild(el('b', '', u.username ? '@' + u.username : '(pas encore de pseudo)'));
+    if (u.is_admin) title.appendChild(el('span', 'badge b-admin', 'admin'));
+    if (u.banned) title.appendChild(el('span', 'badge b-ban', 'banni'));
+    if (!u.email_confirmed_at) title.appendChild(el('span', 'badge b-wait', 'e-mail non confirmé'));
+    else if (isNew(u)) title.appendChild(el('span', 'badge b-new', 'nouveau'));
+    d.appendChild(title);
+    d.appendChild(el('div', 'meta', u.email || ''));
+    d.appendChild(el('div', 'meta',
+      `Inscrit le ${fmtTime(u.created_at)} · Dernière connexion : ${u.last_sign_in_at ? fmtTime(u.last_sign_in_at) : 'jamais'}`));
+    d.appendChild(el('div', 'meta', `${u.rooms} salon(s) · ${u.messages} message(s)`));
+    if (u.username && u.id !== me.id && !u.is_admin) {
+      const acts = el('div', 'acts');
+      const b = el('button', 'ghost', u.banned ? '✅ Débannir' : '⛔ Bannir');
+      b.onclick = async () => {
+        if (!confirm(u.banned ? `Débannir @${u.username} ?` : `Bannir @${u.username} ?`)) return;
+        const { error } = await sb.rpc('set_ban', { target: u.id, value: !u.banned });
+        if (error) alert(error.message); else openMembers();
+      };
+      acts.appendChild(b); d.appendChild(acts);
+    }
+    box.appendChild(d);
   });
 }
 </script>
