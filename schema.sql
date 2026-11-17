@@ -122,7 +122,7 @@ create policy "modifier son profil" on public.profiles for update to authenticat
 revoke update on public.profiles from authenticated;
 grant update (username) on public.profiles to authenticated;
 
-create policy "voir ses salons" on public.rooms for select to authenticated using (is_member(id));
+create policy "voir ses salons" on public.rooms for select to authenticated using (owner = auth.uid() or is_member(id));
 create policy "créer un salon" on public.rooms for insert to authenticated
   with check (owner = auth.uid() and is_active());
 create policy "supprimer son salon" on public.rooms for delete to authenticated

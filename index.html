@@ -260,13 +260,14 @@ $('logout').onclick = () => sb.auth.signOut();
 // ---------- Salons ----------
 async function goHome(){
   leaveChannel(); room = null; show('s-home'); info($('home-info'), '');
-  const { data } = await sb.from('rooms').select('*').order('created_at', { ascending: false });
+  const { data } = await sb.from('rooms').select('*, room_members(count)').order('created_at', { ascending: false });
   const list = $('rooms'); list.innerHTML = '';
   if (!data?.length) return list.appendChild(el('div', 'empty', 'Aucun salon pour l\'instant.'));
   data.forEach(r => {
     const d = el('div', 'room');
     const left = el('div'); left.appendChild(el('div', '', r.name));
-    left.appendChild(el('small', '', r.owner === me.id ? 'Ton salon' : 'Membre'));
+    const n = r.room_members?.[0]?.count ?? 0;
+    left.appendChild(el('small', '', (r.owner === me.id ? 'Ton salon' : 'Membre') + ' · ' + plural(n)));
     d.appendChild(left); d.appendChild(el('span', '', '›'));
     d.onclick = () => openRoom(r);
     list.appendChild(d);
@@ -314,15 +315,24 @@ $('room-menu').onclick = () => {
   openSheet(acts);
 };
 
+function plural(n){ return n + (n > 1 ? ' membres' : ' membre'); }
+
+async function refreshMemberCount(){
+  if (!room) return;
+  const { count } = await sb.from('room_members').select('*', { count: 'exact', head: true }).eq('room_id', room.id);
+  room.members_count = count ?? 0; renderRoomHeader();
+}
+
 function renderRoomHeader(){
   $('room-title').textContent = room.name;
   $('room-sub').innerHTML = '';
+  if (room.members_count != null) $('room-sub').append(plural(room.members_count) + ' · ');
   if (room.owner === me.id) { $('room-sub').append('Code : '); $('room-sub').appendChild(el('span', 'code', room.invite_code)); }
-  else $('room-sub').textContent = 'Salon privé';
+  else $('room-sub').append('Salon privé');
 }
 
 async function openRoom(r){
-  room = r; show('s-room'); renderRoomHeader();
+  room = r; show('s-room'); renderRoomHeader(); refreshMemberCount();
   $('msgs').innerHTML = '';
   const { data } = await sb.from('messages').select('*').eq('room_id', r.id).order('created_at', { ascending: false }).limit(100);
   const msgs = (data || []).reverse();
