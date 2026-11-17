@@ -346,6 +346,10 @@ async function openRoom(r){
       async ({ new: m }) => { await loadNames([m.user_id]); $('msgs').querySelector('.empty')?.remove(); await addMessage(m); scrollDown(); })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' },
       ({ old }) => document.querySelector(`[data-id="${old.id}"]`)?.remove())
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_members', filter: 'room_id=eq.' + r.id },
+      () => refreshMemberCount())
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'room_members' },
+      () => refreshMemberCount())
     .subscribe();
 }
 

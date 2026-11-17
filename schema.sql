@@ -161,6 +161,7 @@ create policy "supprimer ses photos" on storage.objects for delete to authentica
 
 -- ---------- Temps réel ----------
 alter publication supabase_realtime add table public.messages;
+alter publication supabase_realtime add table public.room_members;
 
 -- =====================================================================
 -- APRÈS ton inscription dans l'app, deviens admin avec :
