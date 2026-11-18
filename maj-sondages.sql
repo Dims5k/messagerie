@@ -37,12 +37,16 @@ alter table public.polls        enable row level security;
 alter table public.poll_options enable row level security;
 alter table public.poll_votes   enable row level security;
 
+drop policy if exists "voir les sondages" on public.polls;
 create policy "voir les sondages" on public.polls for select to authenticated
   using (is_member(room_id) or is_admin());
+drop policy if exists "voir les options" on public.poll_options;
 create policy "voir les options" on public.poll_options for select to authenticated
   using (can_see_poll(poll_id));
+drop policy if exists "voir les votes" on public.poll_votes;
 create policy "voir les votes" on public.poll_votes for select to authenticated
   using (can_see_poll(poll_id));
+drop policy if exists "supprimer un sondage" on public.polls;
 create policy "supprimer un sondage" on public.polls for delete to authenticated
   using (user_id = auth.uid() or is_admin()
      or exists (select 1 from rooms where id = room_id and owner = auth.uid()));
@@ -54,6 +58,9 @@ language plpgsql security definer set search_path = public as $$
 declare pid uuid; o text; i int := 0; n int;
 begin
   if not is_active() or not is_member(r) then raise exception 'Non autorisé'; end if;
+  if not (is_admin() or exists (select 1 from rooms where id = r and owner = auth.uid())) then
+    raise exception 'Seuls l''admin et le propriétaire du salon peuvent créer un sondage';
+  end if;
   q := trim(coalesce(q, ''));
   if q = '' then raise exception 'La question est vide'; end if;
   select count(*) into n from unnest(opts) x where trim(x) <> '';
@@ -102,5 +109,7 @@ grant execute on function public.vote_poll(uuid, uuid) to authenticated;
 grant execute on function public.close_poll(uuid) to authenticated;
 
 -- Temps réel
-alter publication supabase_realtime add table public.polls;
-alter publication supabase_realtime add table public.poll_votes;
+do $$ begin
+  begin alter publication supabase_realtime add table public.polls; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.poll_votes; exception when duplicate_object then null; end;
+end $$;
