@@ -52,6 +52,7 @@
   .m{max-width:80%;padding:8px 12px;border-radius:14px;background:var(--panel);border:1px solid var(--line);word-wrap:break-word;white-space:pre-wrap;cursor:pointer}
   .m.me{align-self:flex-end;background:var(--me);border-color:#2c4688}
   .m .who{font-size:11px;font-weight:700;color:var(--acc);margin-bottom:2px}
+  .m.pollmsg{border-style:dashed;font-weight:600}
   .m.adm{background:#c2410c;border-color:#ea580c;color:#fff}
   .m.adm .who{color:#ffe1c7}
   .m.adm .time{color:#ffd2b0}
@@ -559,7 +560,12 @@ async function addMessage(m){
   if (m.content) d.appendChild(el('div', '', m.content));
   const time = el('div', 'time', fmtTime(m.created_at));
   d.appendChild(time);
-  d.onclick = e => { if (e.target.tagName !== 'IMG') messageMenu(m); else window.open(e.target.src, '_blank'); };
+  const isPoll = m.content?.startsWith('📊 Nouveau sondage');
+  if (isPoll) { d.classList.add('pollmsg'); time.textContent += ' · appuie pour voter'; }
+  d.onclick = e => {
+    if (e.target.tagName === 'IMG') return window.open(e.target.src, '_blank');
+    isPoll ? openPolls() : messageMenu(m);
+  };
   $('msgs').appendChild(d);
   if (m.image_path) {
     const img = document.createElement('img'); img.alt = 'photo';

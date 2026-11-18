@@ -262,6 +262,8 @@ begin
       i := i + 1;
     end if;
   end loop;
+  -- Message automatique dans le salon (déclenche aussi la notification push)
+  insert into messages (room_id, user_id, content) values (r, auth.uid(), '📊 Nouveau sondage : ' || left(q, 200));
   return pid;
 end $$;
 
