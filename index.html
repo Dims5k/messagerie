@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Messagerie</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#171b24">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Messagerie">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root{--bg:#0e1117;--panel:#171b24;--line:#272d3a;--txt:#e9ecf2;--mute:#8b94a7;--acc:#5b8cff;--me:#1f3366;--red:#ff5f5f}
   *{box-sizing:border-box}
@@ -72,6 +80,11 @@
   .b-admin{background:#2b3d77;color:#b9c9ff} .b-ban{background:#5a1f25;color:#ffb3b3} .b-wait{background:#4a3e14;color:#ffe08a} .b-new{background:#173f2c;color:#8ff0bd}
   .empty{color:var(--mute);text-align:center;padding:30px 0;font-size:14px}
   .hidden{display:none!important}
+  .notif{display:flex;gap:10px;align-items:center;padding:12px 14px;border:1px solid #2c4688;background:#16213f;border-radius:14px;margin-top:6px;font-size:13px}
+  .notif div{flex:1}
+  .notif button{padding:9px 12px;background:var(--acc);color:#fff;font-size:13px}
+  .unread{background:#ea580c;color:#fff;font-size:12px;font-weight:700;border-radius:20px;padding:2px 8px;min-width:22px;text-align:center}
+  .room.has-unread>div>div:first-child{font-weight:700}
   .pin{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#1b2130;border-bottom:1px solid var(--line);cursor:pointer}
   .pin .ico{font-size:20px}
   .pin .q{flex:1;min-width:0}
@@ -137,6 +150,7 @@
     <button id="logout" class="ghost">Déconnexion</button>
   </header>
   <div class="body"><div class="wrap">
+    <div id="notif-banner" class="notif hidden"><div id="notif-text"></div><button id="notif-btn">Activer</button></div>
     <div class="section">Rejoindre avec un code</div>
     <div class="row"><input id="join-code" placeholder="Code d'invitation" maxlength="8" style="text-transform:uppercase"><button id="join-btn">Rejoindre</button></div>
     <div class="section">Créer un salon</div>
@@ -198,6 +212,9 @@ const $ = id => document.getElementById(id);
 let me = null, profile = null, room = null, channel = null, signupMode = false;
 let ticker = null, lastAt = null, polls = [], pollPanel = false, tick = 0;
 const names = new Map();
+const VAPID_PUBLIC = 'BHQKyCe02F1NKPXMDFPi5mY3FvYyUqLwJ-ciFX1ovzWEpvJXlJPHHMKrwwYs_Fud_t5_FClOxMvrNsg0jzjTa1g';
+let homeRooms = [];
+let homeChannel = null, mutedRooms = new Set(), pushSaved = false;
 const admins = new Set();
 
 // ---------- Utilitaires ----------
@@ -275,7 +292,10 @@ async function afterLogin(){
   if (profile.is_admin) admins.add(profile.id);
   $('me-name').textContent = '@' + profile.username;
   $('admin-btn').classList.toggle('hidden', !profile.is_admin);
-  goHome();
+  listenHome();
+  const target = new URLSearchParams(location.search).get('room');
+  if (target) openRoomById(target); else goHome();
+  refreshNotifBanner();
 }
 
 $('setup-btn').onclick = async () => {
@@ -287,24 +307,129 @@ $('setup-btn').onclick = async () => {
   afterLogin();
 };
 
-$('logout').onclick = () => sb.auth.signOut();
+$('logout').onclick = async () => {
+  // Cet appareil ne doit plus recevoir les notifs de ce compte
+  try {
+    const sub = await (await navigator.serviceWorker?.getRegistration())?.pushManager.getSubscription();
+    if (sub) await sb.rpc('delete_push_sub', { ep: sub.endpoint });
+  } catch {}
+  if (homeChannel) { sb.removeChannel(homeChannel); homeChannel = null; }
+  pushSaved = false;
+  sb.auth.signOut();
+};
 
 // ---------- Salons ----------
 async function goHome(){
+  if (room) markSeen(room.id, lastAt);
   leaveChannel(); room = null; show('s-home'); info($('home-info'), '');
-  const { data } = await sb.from('rooms').select('*, room_members(count)').order('created_at', { ascending: false });
+  if (location.search) history.replaceState(null, '', location.pathname);
+  const [{ data }, { data: mutes }] = await Promise.all([
+    sb.from('rooms').select('*, room_members(count)').order('created_at', { ascending: false }),
+    sb.from('room_mutes').select('room_id').eq('user_id', me.id)
+  ]);
+  mutedRooms = new Set((mutes || []).map(x => x.room_id));
+  homeRooms = data || [];
   const list = $('rooms'); list.innerHTML = '';
   if (!data?.length) return list.appendChild(el('div', 'empty', 'Aucun salon pour l\'instant.'));
   data.forEach(r => {
-    const d = el('div', 'room');
+    const d = el('div', 'room'); d.dataset.room = r.id;
     const left = el('div'); left.appendChild(el('div', '', r.name));
     const n = r.room_members?.[0]?.count ?? 0;
-    left.appendChild(el('small', '', (r.owner === me.id ? 'Ton salon' : 'Membre') + ' · ' + plural(n)));
+    left.appendChild(el('small', '', (r.owner === me.id ? 'Ton salon' : 'Membre') + ' · ' + plural(n) + (mutedRooms.has(r.id) ? ' · 🔕' : '')));
     d.appendChild(left); d.appendChild(el('span', '', '›'));
     d.onclick = () => openRoom(r);
     list.appendChild(d);
   });
+  refreshUnread();
 }
+
+// ---------- Non-lus ----------
+function seenKey(id){ return 'seen:' + me.id + ':' + id; }
+function getSeen(id){ try { return localStorage.getItem(seenKey(id)); } catch { return null; } }
+function markSeen(id, t){ try { localStorage.setItem(seenKey(id), t || new Date().toISOString()); } catch {} }
+
+async function refreshUnread(){
+  let total = 0;
+  await Promise.all(homeRooms.map(async r => {
+    const seen = getSeen(r.id);
+    if (!seen) { markSeen(r.id); return; }
+    const { count } = await sb.from('messages').select('*', { count: 'exact', head: true })
+      .eq('room_id', r.id).neq('user_id', me.id).gt('created_at', seen);
+    const n = count || 0; total += n;
+    const d = document.querySelector(`.room[data-room="${r.id}"]`);
+    if (!d) return;
+    d.classList.toggle('has-unread', n > 0);
+    const arrow = d.lastChild;
+    arrow.className = n ? 'unread' : ''; arrow.textContent = n ? (n > 99 ? '99+' : n) : '›';
+  }));
+  try { total ? navigator.setAppBadge?.(total) : navigator.clearAppBadge?.(); } catch {}
+}
+
+// Écoute globale : met à jour les pastilles quand on est sur la liste des salons
+function listenHome(){
+  if (homeChannel) sb.removeChannel(homeChannel);
+  let t = null;
+  homeChannel = sb.channel('home-' + me.id)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+      if (room) return;
+      clearTimeout(t); t = setTimeout(refreshUnread, 400);
+    })
+    .subscribe();
+}
+
+async function openRoomById(id){
+  const { data: r } = await sb.from('rooms').select('*').eq('id', id).maybeSingle();
+  if (r) openRoom(r); else goHome();
+}
+
+// ---------- Notifications push ----------
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data?.room && me) openRoomById(e.data.room); });
+}
+function b64ToU8(s){
+  const b = atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(b, c => c.charCodeAt(0));
+}
+async function savePush(sub){
+  const j = sub.toJSON();
+  const { error } = await sb.rpc('save_push_sub', { ep: j.endpoint, k_p256dh: j.keys.p256dh, k_auth: j.keys.auth });
+  if (!error) pushSaved = true;
+  return !error;
+}
+function banner(text, withBtn){
+  $('notif-banner').classList.toggle('hidden', !text);
+  $('notif-text').textContent = text || '';
+  $('notif-btn').classList.toggle('hidden', !withBtn);
+}
+async function refreshNotifBanner(){
+  if (!pushSupported()) {
+    return banner(isIOS && !standalone
+      ? "🔔 Pour recevoir les notifications sur iPhone : bouton Partager → « Sur l'écran d'accueil », puis ouvre la Messagerie depuis l'icône."
+      : '', false);
+  }
+  if (Notification.permission === 'denied') return banner('🔕 Notifications bloquées : autorise-les dans les réglages du navigateur pour ce site.', false);
+  if (Notification.permission === 'granted') {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { if (!pushSaved) await savePush(sub); return banner('', false); }
+  }
+  banner('🔔 Active les notifications pour être prévenu des nouveaux messages.', true);
+}
+$('notif-btn').onclick = async () => {
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return refreshNotifBanner();
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription()
+      || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(VAPID_PUBLIC) });
+    if (!await savePush(sub)) throw 0;
+  } catch { alert("Impossible d'activer les notifications sur cet appareil."); }
+  refreshNotifBanner();
+};
 
 $('create-btn').onclick = async () => {
   const name = $('room-name').value.trim();
@@ -329,6 +454,15 @@ $('back').onclick = goHome;
 $('room-menu').onclick = () => {
   const isOwner = room.owner === me.id;
   const acts = [];
+  const muted = mutedRooms.has(room.id);
+  acts.push([muted ? '🔔 Réactiver les notifications' : '🔕 Couper les notifications de ce salon', async () => {
+    const q = muted
+      ? sb.from('room_mutes').delete().eq('room_id', room.id).eq('user_id', me.id)
+      : sb.from('room_mutes').insert({ room_id: room.id, user_id: me.id });
+    const { error } = await q;
+    if (error) return alert('Erreur : ' + error.message);
+    muted ? mutedRooms.delete(room.id) : mutedRooms.add(room.id);
+  }]);
   if (isOwner) {
     acts.push(['📋 Copier le code : ' + room.invite_code, () => navigator.clipboard?.writeText(room.invite_code)]);
     acts.push(['🔄 Nouveau code (l\'ancien ne marche plus)', async () => {
@@ -364,7 +498,10 @@ function renderRoomHeader(){
 }
 
 async function openRoom(r){
+  if (room && room.id !== r.id) markSeen(room.id, lastAt);
   room = r; show('s-room'); renderRoomHeader(); refreshMemberCount();
+  history.replaceState(null, '', '?room=' + r.id);
+  try { navigator.clearAppBadge?.(); } catch {}
   $('poll-btn').classList.toggle('hidden', !canCreatePoll());
   $('msgs').innerHTML = ''; lastAt = null; polls = []; renderPin(); loadPolls();
   const { data } = await sb.from('messages').select('*').eq('room_id', r.id).order('created_at', { ascending: false }).limit(100);
@@ -414,6 +551,7 @@ function scrollDown(){ const s = $('scroller'); requestAnimationFrame(() => s.sc
 async function addMessage(m){
   if (document.querySelector(`[data-id="${m.id}"]`)) return;
   if (!lastAt || m.created_at > lastAt) lastAt = m.created_at;
+  if (room && !document.hidden) markSeen(room.id, lastAt);
   const mine = m.user_id === me.id;
   const adm = admins.has(m.user_id);
   const d = el('div', 'm' + (mine ? ' me' : '') + (adm ? ' adm' : '')); d.dataset.id = m.id;
