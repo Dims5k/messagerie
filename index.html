@@ -365,6 +365,7 @@ function renderRoomHeader(){
 
 async function openRoom(r){
   room = r; show('s-room'); renderRoomHeader(); refreshMemberCount();
+  $('poll-btn').classList.toggle('hidden', !canCreatePoll());
   $('msgs').innerHTML = ''; lastAt = null; polls = []; renderPin(); loadPolls();
   const { data } = await sb.from('messages').select('*').eq('room_id', r.id).order('created_at', { ascending: false }).limit(100);
   const msgs = (data || []).reverse();
@@ -539,6 +540,7 @@ function renderPin(){
 }
 $('pinbar').onclick = () => openPolls();
 
+function canCreatePoll(){ return profile.is_admin || room.owner === me.id; }
 function canManage(p){ return p.user_id === me.id || profile.is_admin || room.owner === me.id; }
 
 function openPolls(){ renderPolls(); $('sheet').classList.add('on'); pollPanel = true; }
@@ -546,7 +548,7 @@ function openPolls(){ renderPolls(); $('sheet').classList.add('on'); pollPanel =
 function renderPolls(){
   const box = $('sheet-box'); box.innerHTML = '';
   const head = el('div', 'head'); head.appendChild(el('h3', '', '📊 Sondages'));
-  const nb = el('button', '', '+ Nouveau'); nb.onclick = newPollForm; head.appendChild(nb);
+  if (canCreatePoll()) { const nb = el('button', '', '+ Nouveau'); nb.onclick = newPollForm; head.appendChild(nb); }
   box.appendChild(head);
   if (!polls.length) box.appendChild(el('div', 'empty', 'Aucun sondage dans ce salon.'));
   const sorted = [...polls.filter(p => !p.closed), ...polls.filter(p => p.closed)];
