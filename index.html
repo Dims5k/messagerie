@@ -81,6 +81,15 @@
   .b-admin{background:#2b3d77;color:#b9c9ff} .b-ban{background:#5a1f25;color:#ffb3b3} .b-wait{background:#4a3e14;color:#ffe08a} .b-new{background:#173f2c;color:#8ff0bd}
   .empty{color:var(--mute);text-align:center;padding:30px 0;font-size:14px}
   .hidden{display:none!important}
+  .welcome h3{margin:4px 0 8px;font-size:19px}
+  .welcome p,.welcome li{font-size:14px;color:var(--txt)}
+  .welcome p{margin:8px 0}
+  .welcome ul{margin:6px 0;padding-left:20px}
+  .welcome li{margin:4px 0}
+  .welcome i{color:var(--mute)}
+  .welcome hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+  .welcome .k{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:0 5px;font-size:12px}
+  .sheet .welcome button#welcome-ok{background:var(--acc);color:#fff;border:0;margin-top:12px}
   .notif{display:flex;gap:10px;align-items:center;padding:12px 14px;border:1px solid #2c4688;background:#16213f;border-radius:14px;margin-top:6px;font-size:13px}
   .notif div{flex:1}
   .notif button{padding:9px 12px;background:var(--acc);color:#fff;font-size:13px}
@@ -197,6 +206,29 @@
   <div class="body"><div class="wrap" id="reports"></div></div>
 </div>
 
+<!-- Explication notifications (1re connexion) -->
+<div id="welcome" class="sheet"><div class="box welcome">
+  <h3>🔔 Notifications</h3>
+  <p><b>🇫🇷 Tu veux être prévenu des nouveaux messages ?</b><br>
+  Ajoute la Messagerie à ton écran d'accueil, puis ouvre-la toujours depuis cette icône :</p>
+  <ul>
+    <li><b>iPhone :</b> dans Safari, bouton Partager <span class="k">⬆︎</span> → « Sur l'écran d'accueil ».</li>
+    <li><b>Android :</b> menu <span class="k">⋮</span> de Chrome → « Ajouter à l'écran d'accueil » (ou « Installer l'appli »).</li>
+  </ul>
+  <p>Ensuite, appuie sur <b>🔔 Activer</b> sur l'accueil.<br>
+  <i>Tu ne veux pas de notifications ? Ne fais rien du tout, l'appli marche normalement.</i></p>
+  <hr>
+  <p><b>🇬🇧 Want to be notified of new messages?</b><br>
+  Add Messagerie to your home screen, then always open it from that icon:</p>
+  <ul>
+    <li><b>iPhone:</b> in Safari, Share button <span class="k">⬆︎</span> → "Add to Home Screen".</li>
+    <li><b>Android:</b> Chrome menu <span class="k">⋮</span> → "Add to Home screen" (or "Install app").</li>
+  </ul>
+  <p>Then tap <b>🔔 Activer</b> on the home page.<br>
+  <i>Don't want notifications? Do nothing at all, the app works normally.</i></p>
+  <button id="welcome-ok">Compris / Got it</button>
+</div></div>
+
 <!-- Menu contextuel -->
 <div id="sheet" class="sheet"><div class="box" id="sheet-box"></div></div>
 
@@ -297,7 +329,20 @@ async function afterLogin(){
   const target = new URLSearchParams(location.search).get('room');
   if (target) openRoomById(target); else goHome();
   refreshNotifBanner();
+  showWelcome();
 }
+
+// Explication des notifications : une seule fois par appareil, et pas si l'appli est déjà installée
+function showWelcome(){
+  let seen = false;
+  try { seen = localStorage.getItem('welcome-notif') === '1'; } catch {}
+  if (seen || standalone) return;
+  $('welcome').classList.add('on');
+}
+$('welcome-ok').onclick = () => {
+  try { localStorage.setItem('welcome-notif', '1'); } catch {}
+  $('welcome').classList.remove('on');
+};
 
 $('setup-btn').onclick = async () => {
   const username = $('username').value.trim();
