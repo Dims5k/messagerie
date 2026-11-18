@@ -289,12 +289,13 @@ $('auth-btn').onclick = async () => {
   if (!email || password.length < 8) return info($('auth-info'), 'E-mail valide et mot de passe de 8 caractères minimum.');
   $('auth-btn').disabled = true;
   if (signupMode) {
-    const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (error) info($('auth-info'), error.message);
-    else info($('auth-info'), 'Compte créé ! Clique sur le lien reçu par e-mail pour l\'activer.', 'ok');
+    const { data, error } = await sb.auth.signUp({ email, password });
+    if (error) info($('auth-info'), /already registered/i.test(error.message) ? 'Ce compte existe déjà, connecte-toi.' : error.message);
+    else if (!data.session) info($('auth-info'), 'Compte créé, mais la connexion directe est désactivée côté serveur.');
+    else info($('auth-info'), 'Compte créé, bienvenue !', 'ok');
   } else {
     const { error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) info($('auth-info'), error.message === 'Email not confirmed' ? 'Confirme d\'abord ton e-mail.' : 'E-mail ou mot de passe incorrect.');
+    if (error) info($('auth-info'), 'E-mail ou mot de passe incorrect.');
   }
   $('auth-btn').disabled = false;
 };
@@ -872,8 +873,7 @@ async function openMembers(){
     title.appendChild(el('b', '', u.username ? '@' + u.username : '(pas encore de pseudo)'));
     if (u.is_admin) title.appendChild(el('span', 'badge b-admin', 'admin'));
     if (u.banned) title.appendChild(el('span', 'badge b-ban', 'banni'));
-    if (!u.email_confirmed_at) title.appendChild(el('span', 'badge b-wait', 'e-mail non confirmé'));
-    else if (isNew(u)) title.appendChild(el('span', 'badge b-new', 'nouveau'));
+    if (isNew(u)) title.appendChild(el('span', 'badge b-new', 'nouveau'));
     d.appendChild(title);
     d.appendChild(el('div', 'meta', u.email || ''));
     d.appendChild(el('div', 'meta',
