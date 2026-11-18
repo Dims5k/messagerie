@@ -72,6 +72,25 @@
   .b-admin{background:#2b3d77;color:#b9c9ff} .b-ban{background:#5a1f25;color:#ffb3b3} .b-wait{background:#4a3e14;color:#ffe08a} .b-new{background:#173f2c;color:#8ff0bd}
   .empty{color:var(--mute);text-align:center;padding:30px 0;font-size:14px}
   .hidden{display:none!important}
+  .pin{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#1b2130;border-bottom:1px solid var(--line);cursor:pointer}
+  .pin .ico{font-size:20px}
+  .pin .q{flex:1;min-width:0}
+  .pin .q b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+  .pin .q small{color:var(--mute);font-size:12px}
+  .sheet .box{max-height:88vh;overflow-y:auto}
+  .sheet .head{display:flex;justify-content:space-between;align-items:center;margin:2px 2px 10px}
+  .sheet .head h3{margin:0;font-size:17px}
+  .sheet .head button{width:auto;margin:0;padding:8px 12px;background:var(--acc);color:#fff;border:0}
+  .poll{border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px;background:#0f1219}
+  .poll.done{opacity:.75}
+  .poll h4{margin:0 0 2px;font-size:16px}
+  .poll .meta{color:var(--mute);font-size:12px;margin-bottom:6px}
+  .sheet button.opt{display:flex;justify-content:space-between;gap:10px;text-align:left;margin-top:6px;padding:12px}
+  .sheet button.opt.mine{border-color:var(--acc)}
+  .sheet button.opt span:last-child{color:var(--mute);white-space:nowrap;font-weight:500}
+  .poll .pacts{display:flex;gap:6px}
+  .sheet .pacts button{font-size:13px;padding:9px}
+  .sheet input{margin-top:8px}
 </style>
 </head>
 <body>
@@ -135,9 +154,15 @@
     <div class="t"><h2 id="room-title"></h2><span id="room-sub"></span></div>
     <button id="room-menu" class="ghost">⋯</button>
   </header>
+  <div id="pinbar" class="pin hidden">
+    <span class="ico">📊</span>
+    <div class="q"><b id="pin-q"></b><small id="pin-sub"></small></div>
+    <span>›</span>
+  </div>
   <div class="body" id="scroller"><div class="wrap" id="msgs"></div></div>
   <footer>
     <button class="icon" id="pick" title="Photo">📷</button>
+    <button class="icon" id="poll-btn" title="Sondage">📊</button>
     <input id="file" type="file" accept="image/*" hidden>
     <input id="txt" placeholder="Message…" maxlength="2000" autocomplete="off">
     <button class="send" id="send">➤</button>
@@ -171,6 +196,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_-N-vIJLCZBbHZ_Eg_6AjvQ_P-Xw9p3a';
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = id => document.getElementById(id);
 let me = null, profile = null, room = null, channel = null, signupMode = false;
+let ticker = null, lastAt = null, polls = [], pollPanel = false, tick = 0;
 const names = new Map();
 const admins = new Set();
 
@@ -179,9 +205,10 @@ function show(id){ document.querySelectorAll('.screen').forEach(s => s.classList
 function info(el, text, type = 'err'){ el.textContent = text || ''; el.className = 'msg-info ' + type; }
 function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function fmtTime(d){ return new Date(d).toLocaleString('fr-BE', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit' }); }
-function closeSheet(){ $('sheet').classList.remove('on'); }
+function closeSheet(){ $('sheet').classList.remove('on'); pollPanel = false; }
 $('sheet').onclick = e => { if (e.target.id === 'sheet') closeSheet(); };
 function openSheet(actions){
+  pollPanel = false;
   const box = $('sheet-box'); box.innerHTML = '';
   actions.forEach(([label, fn, danger]) => {
     const b = el('button', danger ? 'danger' : '', label);
@@ -338,7 +365,7 @@ function renderRoomHeader(){
 
 async function openRoom(r){
   room = r; show('s-room'); renderRoomHeader(); refreshMemberCount();
-  $('msgs').innerHTML = '';
+  $('msgs').innerHTML = ''; lastAt = null; polls = []; renderPin(); loadPolls();
   const { data } = await sb.from('messages').select('*').eq('room_id', r.id).order('created_at', { ascending: false }).limit(100);
   const msgs = (data || []).reverse();
   await loadNames(msgs.map(m => m.user_id));
@@ -355,29 +382,53 @@ async function openRoom(r){
       () => refreshMemberCount())
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'room_members' },
       () => refreshMemberCount())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'polls', filter: 'room_id=eq.' + r.id },
+      () => loadPolls())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'poll_votes' },
+      () => loadPolls())
     .subscribe();
+  // Filet de sécurité : si le temps réel décroche, on va chercher les nouveautés toutes les 4 s
+  ticker = setInterval(() => { fetchNew(); if (++tick % 2 === 0) loadPolls(); }, 4000);
 }
 
-function leaveChannel(){ if (channel) { sb.removeChannel(channel); channel = null; } }
+async function fetchNew(){
+  if (!room || !lastAt || document.hidden) return;
+  const rid = room.id;
+  const { data } = await sb.from('messages').select('*').eq('room_id', rid).gt('created_at', lastAt).order('created_at').limit(50);
+  if (!data?.length || room?.id !== rid) return;
+  await loadNames(data.map(m => m.user_id));
+  $('msgs').querySelector('.empty')?.remove();
+  for (const m of data) await addMessage(m);
+  scrollDown();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { fetchNew(); loadPolls(); } });
+
+function leaveChannel(){
+  if (channel) { sb.removeChannel(channel); channel = null; }
+  if (ticker) { clearInterval(ticker); ticker = null; }
+  $('pinbar')?.classList.add('hidden');
+}
 function scrollDown(){ const s = $('scroller'); requestAnimationFrame(() => s.scrollTop = s.scrollHeight); }
 
 async function addMessage(m){
   if (document.querySelector(`[data-id="${m.id}"]`)) return;
+  if (!lastAt || m.created_at > lastAt) lastAt = m.created_at;
   const mine = m.user_id === me.id;
   const adm = admins.has(m.user_id);
   const d = el('div', 'm' + (mine ? ' me' : '') + (adm ? ' adm' : '')); d.dataset.id = m.id;
   if (!mine || adm) d.appendChild(el('div', 'who', (names.get(m.user_id) || '…') + (adm ? ' (admin)' : '')));
   if (m.content) d.appendChild(el('div', '', m.content));
+  const time = el('div', 'time', fmtTime(m.created_at));
+  d.appendChild(time);
+  d.onclick = e => { if (e.target.tagName !== 'IMG') messageMenu(m); else window.open(e.target.src, '_blank'); };
+  $('msgs').appendChild(d);
   if (m.image_path) {
     const img = document.createElement('img'); img.alt = 'photo';
+    d.insertBefore(img, time);
     const { data } = await sb.storage.from('photos').createSignedUrl(m.image_path, 3600);
     if (data) img.src = data.signedUrl;
     img.onload = () => scrollDown();
-    d.appendChild(img);
   }
-  d.appendChild(el('div', 'time', fmtTime(m.created_at)));
-  d.onclick = e => { if (e.target.tagName !== 'IMG') messageMenu(m); else window.open(e.target.src, '_blank'); };
-  $('msgs').appendChild(d);
 }
 
 function messageMenu(m){
@@ -417,8 +468,14 @@ async function sendText(){
   const content = $('txt').value.trim();
   if (!content || !room) return;
   $('txt').value = '';
-  const { error } = await sb.from('messages').insert({ room_id: room.id, user_id: me.id, content });
-  if (error) { $('txt').value = content; alert('Message non envoyé.'); }
+  const { data, error } = await sb.from('messages').insert({ room_id: room.id, user_id: me.id, content }).select().single();
+  if (error) { $('txt').value = content; return alert('Message non envoyé.'); }
+  showSent(data);
+}
+async function showSent(m){
+  if (!m || room?.id !== m.room_id) return;
+  $('msgs').querySelector('.empty')?.remove();
+  await addMessage(m); scrollDown();
 }
 $('send').onclick = sendText;
 $('txt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } };
@@ -433,8 +490,9 @@ $('file').onchange = async () => {
     const path = `${room.id}/${me.id}/${Date.now()}.jpg`;
     const { error: upErr } = await sb.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' });
     if (upErr) throw upErr;
-    const { error } = await sb.from('messages').insert({ room_id: room.id, user_id: me.id, image_path: path });
+    const { data, error } = await sb.from('messages').insert({ room_id: room.id, user_id: me.id, image_path: path }).select().single();
     if (error) throw error;
+    showSent(data);
   } catch (e) { alert('Photo non envoyée.'); }
   $('pick').disabled = false; $('pick').textContent = '📷';
 };
@@ -455,6 +513,115 @@ function compress(file, max = 1600, q = 0.82){
     img.src = URL.createObjectURL(file);
   });
 }
+
+// ---------- Sondages ----------
+async function loadPolls(){
+  if (!room) return;
+  const rid = room.id;
+  const { data } = await sb.from('polls').select('*, poll_options(*), poll_votes(option_id, user_id)')
+    .eq('room_id', rid).order('created_at', { ascending: false });
+  if (room?.id !== rid) return;
+  polls = data || [];
+  await loadNames(polls.map(p => p.user_id));
+  renderPin();
+  if (pollPanel) renderPolls();
+}
+
+function renderPin(){
+  const open = polls.filter(p => !p.closed);
+  $('pinbar').classList.toggle('hidden', !open.length);
+  if (!open.length) return;
+  const p = open[0], n = p.poll_votes.length;
+  const voted = p.poll_votes.some(v => v.user_id === me.id);
+  $('pin-q').textContent = p.question;
+  $('pin-sub').textContent = `Sondage · ${n} vote${n > 1 ? 's' : ''}` + (voted ? ' · tu as voté ✓' : ' · appuie pour voter')
+    + (open.length > 1 ? ` · ${open.length} sondages en cours` : '');
+}
+$('pinbar').onclick = () => openPolls();
+
+function canManage(p){ return p.user_id === me.id || profile.is_admin || room.owner === me.id; }
+
+function openPolls(){ renderPolls(); $('sheet').classList.add('on'); pollPanel = true; }
+
+function renderPolls(){
+  const box = $('sheet-box'); box.innerHTML = '';
+  const head = el('div', 'head'); head.appendChild(el('h3', '', '📊 Sondages'));
+  const nb = el('button', '', '+ Nouveau'); nb.onclick = newPollForm; head.appendChild(nb);
+  box.appendChild(head);
+  if (!polls.length) box.appendChild(el('div', 'empty', 'Aucun sondage dans ce salon.'));
+  const sorted = [...polls.filter(p => !p.closed), ...polls.filter(p => p.closed)];
+  sorted.forEach(p => {
+    const c = el('div', 'poll' + (p.closed ? ' done' : ''));
+    c.appendChild(el('h4', '', p.question));
+    const total = p.poll_votes.length;
+    const mine = p.poll_votes.find(v => v.user_id === me.id)?.option_id;
+    c.appendChild(el('div', 'meta', `par ${names.get(p.user_id) || '…'} · ${total} vote${total > 1 ? 's' : ''}` + (p.closed ? ' · terminé' : '')));
+    [...p.poll_options].sort((a, b) => a.position - b.position).forEach(o => {
+      const n = p.poll_votes.filter(v => v.option_id === o.id).length;
+      const pct = total ? Math.round(n * 100 / total) : 0;
+      const b = el('button', 'opt' + (mine === o.id ? ' mine' : ''));
+      b.style.background = `linear-gradient(90deg, ${mine === o.id ? '#2b4fb3' : '#26314d'} ${pct}%, #0f1219 ${pct}%)`;
+      b.appendChild(el('span', '', (mine === o.id ? '✓ ' : '') + o.label));
+      b.appendChild(el('span', '', `${pct}% · ${n}`));
+      b.disabled = p.closed;
+      b.onclick = async () => {
+        const { error } = await sb.rpc('vote_poll', { p: p.id, o: o.id });
+        if (error) alert(error.message); else loadPolls();
+      };
+      c.appendChild(b);
+    });
+    if (canManage(p)) {
+      const a = el('div', 'pacts');
+      if (!p.closed) {
+        const cl = el('button', '', '🔒 Clore');
+        cl.onclick = async () => { const { error } = await sb.rpc('close_poll', { p: p.id }); if (error) alert(error.message); else loadPolls(); };
+        a.appendChild(cl);
+      }
+      const del = el('button', 'danger', '🗑️ Supprimer');
+      del.onclick = async () => {
+        if (!confirm('Supprimer ce sondage ?')) return;
+        await sb.from('polls').delete().eq('id', p.id); loadPolls();
+      };
+      a.appendChild(del); c.appendChild(a);
+    }
+    box.appendChild(c);
+  });
+  const f = el('button', '', 'Fermer'); f.onclick = closeSheet; box.appendChild(f);
+}
+
+function newPollForm(){
+  pollPanel = false;
+  const box = $('sheet-box'); box.innerHTML = '';
+  const head = el('div', 'head'); head.appendChild(el('h3', '', 'Nouveau sondage')); box.appendChild(head);
+  const q = el('input'); q.placeholder = 'Ta question'; q.maxLength = 200; box.appendChild(q);
+  const list = el('div'); box.appendChild(list);
+  const addOpt = () => {
+    if (list.children.length >= 10) return;
+    const i = el('input'); i.placeholder = 'Proposition ' + (list.children.length + 1); i.maxLength = 100;
+    list.appendChild(i); return i;
+  };
+  addOpt(); addOpt();
+  const more = el('button', '', '+ Ajouter une proposition');
+  more.onclick = () => { addOpt()?.focus(); if (list.children.length >= 10) more.disabled = true; };
+  box.appendChild(more);
+  const pub = el('button', '', '📊 Publier le sondage');
+  pub.style.cssText = 'background:var(--acc);color:#fff;border:0';
+  pub.onclick = async () => {
+    const opts = [...list.children].map(i => i.value.trim()).filter(Boolean);
+    if (!q.value.trim()) return alert('Écris ta question.');
+    if (opts.length < 2) return alert('Il faut au moins 2 propositions.');
+    pub.disabled = true;
+    const { error } = await sb.rpc('create_poll', { r: room.id, q: q.value.trim(), opts });
+    pub.disabled = false;
+    if (error) return alert(error.message);
+    await loadPolls(); openPolls();
+  };
+  box.appendChild(pub);
+  const c = el('button', '', 'Annuler'); c.onclick = closeSheet; box.appendChild(c);
+  $('sheet').classList.add('on');
+  q.focus();
+}
+$('poll-btn').onclick = newPollForm;
 
 // ---------- Modération ----------
 let adminTab = 'members';
